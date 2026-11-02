@@ -1,22 +1,25 @@
 import socket
 from crc_module import mod2div
 
-SHARED_KEY = "1001"
-CRC_BITS = len(SHARED_KEY) - 1
+SHARED_KEY = "1001"                                                      # the shared key used for CRC error detection
+CRC_BITS = len(SHARED_KEY) - 1                                           # number of CRC bits
+
 
 # convert string of bits to text (8 bits = 1 character)
 def bits_to_text(bits):
     text = ""
     for i in range(0, len(bits), 8):
-        text += chr(int(bits[i:i+8], 2))
+        text += chr(int(bits[i:i+8], 2))                                # takes 8 bits at a time, converts to decimal, then to ASCII character
     return text
+
 
 # helper function to sort votes in descending order
 def get_votes(item):
     return item[1]
 
+
 def run_receiver():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)   # create a TCP socket
     server_socket.bind(('192.168.254.110', 65432))
     server_socket.listen(1)
     print("[Receiver] Server listening for connections...")
@@ -24,10 +27,13 @@ def run_receiver():
     conn, addr = server_socket.accept()
     print(f"[Receiver] Connected to: {addr}")
 
+
+    # initialize variables to store received data
     area, eligible, votes = None, None, {}
     error, done = False, False
 
-    for line in conn.makefile("r", encoding="utf-8"):
+
+    for line in conn.makefile("r", encoding="utf-8"):                   # read lines from the connection as text
         bits = line.strip()
 
         # too short to be a real message
@@ -40,9 +46,11 @@ def run_receiver():
             error = True
             break
 
-        text = bits_to_text(bits[:-CRC_BITS])    # remove CRC bits, decode
+        text = bits_to_text(bits[:-CRC_BITS])                           # remove CRC bits, decode
         print(f"[Receiver] Received text: {text}")
 
+
+        # parse the text into its components
         parts = text.split("|")
         if parts[0] == "AREA":
             area = parts[1]
@@ -54,19 +62,23 @@ def run_receiver():
             done = True
             break
 
+
+    # check if any errors occurred or if the data is incomplete
     if error or not done or area is None or eligible is None or not votes:
         print("[Receiver] Error detected in transmission.")
         conn.sendall("NACK: Data corrupted\n".encode('utf-8'))
     else:
         conn.sendall("ACK: Data received successfully\n".encode('utf-8'))
-        total = sum(votes.values())
-        ranked = sorted(votes.items(), key=get_votes, reverse=True)
-        for rank, (name, count) in enumerate(ranked, start=1):
+        total = sum(votes.values())                                                                             # calculate total votes
+        ranked = sorted(votes.items(), key=get_votes, reverse=True)                                             # sort nominees by vote count in descending order
+        for rank, (name, count) in enumerate(ranked, start=1):                                                  # print the results with rank, name, vote count, and percentage of total votes        
             print(f"Rank {rank}: {name} with {count} votes ({count / total * 100:.2f}%)")
         print(f"Total votes: {total}")
         print(f"Total eligible voters: {eligible}")
         print(f"Voters who voted: {total / eligible * 100:.2f}%")
 
+
+    # close the connection and the server socket
     conn.close()
     server_socket.close()
 
