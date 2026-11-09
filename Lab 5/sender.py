@@ -2,14 +2,13 @@
 # CMSC 137 - LE5.1 (Client / Sender)
  
 import socket
-import sys
 from crc_module import encode_data      # sir's CRC encoder (unchanged)
  
 # ---------- SETTINGS ----------
 SHARED_KEY = "1001"                                   # CRC key, same as the receiver's
-HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"   # receiver IP (optional argument)
+HOST = "192.168.254.110"   # receiver IP (optional argument)
 PORT = 65432                                           # must match the receiver's port
-TEST_ERROR = True                                    # True = damage one line to test NACK
+TEST_ERROR = False                                    # True = damage one line to test NACK
  
 # ---------- data / made-up sample values ----------
 AREA_CODE = "0101"
@@ -19,10 +18,10 @@ ELIGIBLE_VOTERS = 5000
  #this function is used to build the lines of text to send, in the agreed format w/ receiver. 
  #creates a list of strings that represent the area code, nominees with their votes, eligible voters, & END marker to indicate completion of mssg
 def build_lines():
-    lines = [f"AREA | {AREA_CODE}"]
-    lines += [f"NOMINEE | {name} | {votes}" for name, votes in NOMINEES.items()]
-    lines.append(f"ELIGIBLE | {ELIGIBLE_VOTERS}")
-    lines.append("END")                 # marks that the message is complete
+    lines = [f"AREA|{AREA_CODE}"]
+    lines += [f"NOMINEE|{name}|{votes}" for name, votes in NOMINEES.items()]
+    lines.append(f"ELIGIBLE|{ELIGIBLE_VOTERS}")
+    lines.append("DONE")                 # marks that the message is complete
     return lines
  
  #this function is to encode the data w/ crc, by calling the encode_data function from crc_module
