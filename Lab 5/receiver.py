@@ -1,6 +1,6 @@
 # receiver.py
 # Name: Marinelle Joan U. Tambolero
-# CMSC 141 - LE5.1 (receiver)
+# CMSC 137 - LE5.1 (receiver)
 
 import socket
 from crc_module import mod2div
