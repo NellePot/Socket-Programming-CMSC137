@@ -60,11 +60,13 @@ def run_receiver():
         # too short to be a real message
         if len(bits) < 8 + CRC_BITS:
             error = True
+            conn.sendall("NACK: Data corrupted\n".encode("utf-8")) 
             break
 
         # CRC check: a remainder with a 1 means the data was corrupted
         if "1" in mod2div(bits, SHARED_KEY):
             error = True
+            conn.sendall("NACK: Data corrupted\n".encode("utf-8")) 
             break
 
         text = bits_to_text(bits[:-CRC_BITS])                           # remove CRC bits, decode
@@ -87,7 +89,7 @@ def run_receiver():
             done = True
 
         conn.sendall("ACK: Line received\n".encode('utf-8'))  # send acknowledgment for each line
-
+        
         if parts[0] == "VOTE":
             show_results(area, eligible, votes)  # show live results after each vote line
         if done:
