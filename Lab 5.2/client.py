@@ -3,7 +3,6 @@
 # CMSC 137 - LE5.2 (Client)
 
 import socket
-import sys
 import threading
 from prompt_toolkit import PromptSession, prompt            # prompt = asterisks + clean typing line
 from prompt_toolkit.patch_stdout import patch_stdout        # new messages appear ABOVE what you are typing
@@ -34,14 +33,16 @@ def decrypt(cipher, d, n):
     return "".join(chr(pow(int(num), d, n)) for num in cipher.split())
 
 
-def build_line(text, partners):
-    #Makes ONE line holding an encrypted copy of the text for every partner.
-    #Format:  name=numbers|name=numbers
-    return "|".join(f"{name}={encrypt(text, e, n)}" for name, (e, n) in partners.items())
+def build_line(text, partners, sender):
+    #Makes ONE line: who sent it, then an encrypted copy of the text for every partner.
+    #Format:  from=sender|name=numbers|name=numbers
+    copies = "|".join(f"{name}={encrypt(text, e, n)}" for name, (e, n) in partners.items())
+    return f"from={sender}|{copies}"
 
 
 def find_my_copy(line, my_name):
     #Looks through the line for the copy meant for me. Returns None if there is none
+    #(the "from=..." part never matches a recipient name, so it is skipped)
     for part in line.split("|"):
         name, _, cipher = part.partition("=")
         if name == my_name:
@@ -57,8 +58,8 @@ def receive_messages(client, my_name, d, n):
         for line in reader:
             cipher = find_my_copy(line.strip(), my_name)
             if cipher:
-                print(f"\n [Encrypted] {cipher}")                   # what travelled (unreadable)
-                print(f"\n [Decrypted] {decrypt(cipher, d, n)}")    # readable text
+                #print(f"\n [Encrypted] {cipher}")                   # what travelled (unreadable)
+                print(f"\n {decrypt(cipher, d, n)}")    # readable text
     except OSError:
         pass
     print("Disconnected from the server. Press Enter to exit.")
@@ -66,18 +67,19 @@ def receive_messages(client, my_name, d, n):
 
 # ================= MAIN =================
 def main():
-    # Who am I, and where is the server?
-    my_name = sys.argv[1].lower() if len(sys.argv) > 1 else "chong"
-    host = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
-    if my_name not in PUBLIC_KEYS:
-        sys.exit(f"Unknown name '{my_name}'. Choose from: {', '.join(PUBLIC_KEYS)}")
+    # Ask who I am and where the server is (no command-line arguments needed)
+    host = input("Server IP (press Enter for 127.0.0.1): ").strip() or "127.0.0.1"
+    while True:
+        my_name = input(f"Enter your name ({', '.join(PUBLIC_KEYS)}): ").strip().lower()
+        if my_name in PUBLIC_KEYS:
+            break
+        print(f"Unknown name '{my_name}'. Choose from: {', '.join(PUBLIC_KEYS)}")
+    nickname = my_name                     # the name is also the nickname shown in messages
 
     my_e, my_n = PUBLIC_KEYS[my_name]
     # everyone I will encrypt for (all the others; myself too only when testing alone)
     partners = {name: key for name, key in PUBLIC_KEYS.items() if SOLO_TEST or name != my_name}
     limit = min(n for e, n in PUBLIC_KEYS.values())      # a character's number must be below every n
-
-    nickname = input("Choose your nickname: ")
 
     # Ask for the private key (asterisks) and check it BEFORE connecting:
     # encrypt 65 with my public key, then decrypt it with the typed key. We must get 65 back.
@@ -90,7 +92,11 @@ def main():
 
     # Connect (sir's code)
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect((host, PORT))
+    try:
+        client.connect((host, PORT))
+    except OSError as err:
+        print(f"Could not connect to {host}:{PORT} ({err}).")
+        return
     print(f"Connected as {my_name}. Type a message and press Enter. Ctrl+C to quit.")
 
     session = PromptSession()
@@ -109,7 +115,7 @@ def main():
                 print("Some characters can't be encrypted (emoji or special symbols). Try again.")
                 continue
             try:
-                client.sendall((build_line(full_message, partners) + "\n").encode("utf-8"))
+                client.sendall((build_line(full_message, partners, my_name) + "\n").encode("utf-8"))
             except OSError:
                 break
     client.close()

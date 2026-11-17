@@ -6,7 +6,7 @@ import socket
 import threading
 
 # ================= SETTINGS =================
-HOST = '127.0.0.1'      # IP of the laptop running server.py (same laptop = 127.0.0.1)
+HOST = '10.74.0.142'      # IP of the laptop running server.py (same laptop = 127.0.0.1)
 PORT = 65432            # must be the same as PORT in client.py
 
 # ================= SERVER SOCKET =================
@@ -26,7 +26,7 @@ def remove_client(client):
 def broadcast(message, sender):
     """Sends one encrypted line to every client except the sender."""
     for c in clients[:]:                                            # make a copy of the list in case it changes while we're looping
-        if c !=sender:
+        if c != sender:
             try:
                 c.sendall(message)
             except OSError:
@@ -40,7 +40,10 @@ def handle_client(client):
             line = reader.readline()        # waits until "\n" arrives
             if not line:                    # empty = client disconnected
                 break
-            print(f"[Relay] {line.decode('utf-8').strip()}")
+            text = line.decode('utf-8').strip()
+            header, _, copies = text.partition('|')             # "from=nelle" | "chong=...|mm=..."
+            sender = header[5:] if header.startswith('from=') else 'unknown'
+            print(f"[Relay] {sender} sent: {copies}")
             broadcast(line, client)
         except OSError:
             break
