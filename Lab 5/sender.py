@@ -1,6 +1,6 @@
 # Ong_CH_LE5.1_sender.py
 # Name: Christel Hope S. Ong
-# CMSC 137 - LE5.1 (Client / Sender)
+# CMSC 137 - LE5.1 (Sender)
 
 import socket
 import sys

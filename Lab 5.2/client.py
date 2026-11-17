@@ -1,30 +1,16 @@
-# client.py
-# Name: CHRISTEL HOPE ONG
-# CMSC 141 - LE5.2 (RSA chat client)
-#
-# Based on sir's client.py (chat client with a receive thread and a write thread).
-# Added: private key prompt with asterisks, RSA encryption of outgoing
-# messages, and RSA decryption of incoming messages.
-#
-# HOW THE CHAT WORKS: client -> server -> client
-#   The server only relays the messages, so it only ever sees unreadable numbers.
-#   Encrypt with the PARTNER's public key, decrypt with MY private key.
-#
-# HOW TO USE THIS FILE (each member):
-#   1. Set MY_NAME below to your own name from PUBLIC_KEYS.
-#   2. Set HOST to the IP of the laptop running server.py.
-#   3. Run: python client.py   (the server must already be running)
- 
+# Ong_CH_LE5.2_client.py
+# Name: Christel Hope S. Ong
+# CMSC 137 - LE5.2 (Client)
+
 import socket
+import sys
 import threading
-import msvcrt          # Windows only: lets us read one key press at a time
- 
-# ================= SETTINGS (edit these) =================
-HOST = '127.0.0.1'     # IP of the laptop running server.py (same laptop = 127.0.0.1)
-PORT = 55555           # must be the same as the server's port
- 
-MY_NAME = "chong" # <-- CHANGE THIS to your own name: "chong", "nelle", or "mm"
- 
+from prompt_toolkit import PromptSession, prompt            # prompt = asterisks + clean typing line
+from prompt_toolkit.patch_stdout import patch_stdout        # new messages appear ABOVE what you are typing
+
+# ================= SETTINGS =================
+PORT = 65432            # must be the same as the server's port
+
 # Public keys (e, n) of everyone. Public keys are safe to share.
 # NEVER write a private key in this file.
 PUBLIC_KEYS = {
@@ -32,105 +18,102 @@ PUBLIC_KEYS = {
     "nelle": (89, 8213),
     "mm": (637, 2479),
 }
- 
-MY_E, MY_N = PUBLIC_KEYS[MY_NAME]                       # my own public key
-PARTNERS = {name: key for name, key in PUBLIC_KEYS.items() if name != MY_NAME}
- 
-# For SOLO TEST ONLY (testing alone with two terminals):
-    # uncomment the next line, and re-comment it before pushing to GitHub
-#PARTNERS[MY_NAME] = PUBLIC_KEYS[MY_NAME]
- 
- 
-# ================= RSA AND KEY PROMPT =================
-def ask_private_key():
-    """Asks for the private key and shows * for every digit typed."""
-    while msvcrt.kbhit():                      # throw away leftover key presses (like an old Enter)
-        msvcrt.getwch()
-    print("Enter your private key: ", end="", flush=True)
-    digits = ""
-    while True:
-        key = msvcrt.getwch()                  # read one key without showing it
-        if key in ("\r", "\n"):                # Enter = done
-            break
-        if key == "\b":                        # Backspace = remove the last digit
-            if digits:
-                digits = digits[:-1]
-                print("\b \b", end="", flush=True)
-        elif key.isdigit():
-            digits += key
-            print("*", end="", flush=True)     # show * instead of the digit
-    print()
-    return digits
- 
- 
+
+SOLO_TEST = False      # True = also encrypt a copy for myself, so I can test alone with 2 terminals
+                        # (if you made necessary changes, set it back to False before pushing)
+
+
+# ================= RSA AND MESSAGE FORMAT =================
 def encrypt(text, e, n):
-    """RSA encrypt: each character's number is raised to e, then mod n (c = m^e mod n)."""
+    #RSA encrypt: each character's number is raised to e, then mod n (c = m^e mod n)
     return " ".join(str(pow(ord(ch), e, n)) for ch in text)
- 
- 
+
+
 def decrypt(cipher, d, n):
-    """RSA decrypt: each number is raised to d, then mod n (m = c^d mod n), back to text."""
+    #RSA decrypt: each number is raised to d, then mod n (m = c^d mod n), back to text
     return "".join(chr(pow(int(num), d, n)) for num in cipher.split())
- 
- 
-# ================= BEFORE CONNECTING =================
-nickname = input("Choose your nickname: ")
- 
-# Pick who we are chatting with; their public key is used to encrypt our messages
-partner = ""
-while partner not in PARTNERS:
-    partner = input(f"Who are you chatting with? ({'/'.join(PARTNERS)}): ").lower()
-PARTNER_E, PARTNER_N = PARTNERS[partner]
- 
-# Ask for the private key (asterisks) and check it before connecting:
-# encrypt 65 with my public key, then decrypt it with the typed key. We must get 65 back.
-while True:
-    typed = ask_private_key()
-    if typed and pow(pow(65, MY_E, MY_N), int(typed), MY_N) == 65:
-        MY_D = int(typed)                      # kept in memory only, never saved anywhere
-        break
-    print("Wrong private key, try again.")
- 
-# ================= CONNECT (sir's code - revised) =================
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((HOST, PORT))
- 
- 
-def receive_messages():
-    """Constantly listens for messages from the server, then decrypts them."""
-    reader = client.makefile('r', encoding='utf-8')    # reads one full line at a time, received and decode data from server
+
+
+def build_line(text, partners):
+    #Makes ONE line holding an encrypted copy of the text for every partner.
+    #Format:  name=numbers|name=numbers
+    return "|".join(f"{name}={encrypt(text, e, n)}" for name, (e, n) in partners.items())
+
+
+def find_my_copy(line, my_name):
+    #Looks through the line for the copy meant for me. Returns None if there is none
+    for part in line.split("|"):
+        name, _, cipher = part.partition("=")
+        if name == my_name:
+            return cipher
+    return None
+
+
+# ================= RECEIVING (runs in its own thread) =================
+def receive_messages(client, my_name, d, n):
+    #Constantly listens for lines from the server, then decrypts my copy
+    reader = client.makefile("r", encoding="utf-8")      # reads one full line at a time
+    try:
+        for line in reader:
+            cipher = find_my_copy(line.strip(), my_name)
+            if cipher:
+                print(f"\n [Encrypted] {cipher}")                   # what travelled (unreadable)
+                print(f"\n [Decrypted] {decrypt(cipher, d, n)}")    # readable text
+    except OSError:
+        pass
+    print("Disconnected from the server. Press Enter to exit.")
+
+
+# ================= MAIN =================
+def main():
+    # Who am I, and where is the server?
+    my_name = sys.argv[1].lower() if len(sys.argv) > 1 else "chong"
+    host = sys.argv[2] if len(sys.argv) > 2 else "127.0.0.1"
+    if my_name not in PUBLIC_KEYS:
+        sys.exit(f"Unknown name '{my_name}'. Choose from: {', '.join(PUBLIC_KEYS)}")
+
+    my_e, my_n = PUBLIC_KEYS[my_name]
+    # everyone I will encrypt for (all the others; myself too only when testing alone)
+    partners = {name: key for name, key in PUBLIC_KEYS.items() if SOLO_TEST or name != my_name}
+    limit = min(n for e, n in PUBLIC_KEYS.values())      # a character's number must be below every n
+
+    nickname = input("Choose your nickname: ")
+
+    # Ask for the private key (asterisks) and check it BEFORE connecting:
+    # encrypt 65 with my public key, then decrypt it with the typed key. We must get 65 back.
     while True:
-        try:
-            line = reader.readline()
-            if not line:                               # server closed the connection
+        typed = prompt("Enter your private key: ", is_password=True).strip()
+        if typed.isascii() and typed.isdigit() and pow(pow(65, my_e, my_n), int(typed), my_n) == 65:
+            my_d = int(typed)                  # kept in memory only, never saved anywhere
+            break
+        print("Wrong private key, try again.")
+
+    # Connect (sir's code)
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect((host, PORT))
+    print(f"Connected as {my_name}. Type a message and press Enter. Ctrl+C to quit.")
+
+    session = PromptSession()
+    with patch_stdout():                       # lets the thread print without breaking my typing
+        threading.Thread(target=receive_messages, args=(client, my_name, my_d, my_n),
+                         daemon=True).start()
+        while True:
+            try:
+                text = session.prompt("> ").strip()
+            except (EOFError, KeyboardInterrupt):
                 break
-            print(f"[Encrypted] {line.strip()}")                  # what travelled (unreadable)
-            print(f"[Decrypted] {decrypt(line, MY_D, MY_N)}")     # readable text
-        except Exception:
-            break
-    print("An error occurred! Disconnecting...")
+            if not text:
+                continue
+            full_message = f"{nickname}: {text}"                 # format message with nickname
+            if any(ord(ch) >= limit for ch in full_message):
+                print("Some characters can't be encrypted (emoji or special symbols). Try again.")
+                continue
+            try:
+                client.sendall((build_line(full_message, partners) + "\n").encode("utf-8"))
+            except OSError:
+                break
     client.close()
- 
- 
-def write_messages():
-    """Constantly waits for user input, encrypts it, and sends it."""
-    while True:
-        try:
-            user_input = input("")
-            full_message = f"{nickname}: {user_input}"                 #format mssg with nickname           
-            encrypted = encrypt(full_message, PARTNER_E, PARTNER_N)    # encrypt for the partner
-            print(f"[Sent encrypted] {encrypted}")
-            client.send((encrypted + "\n").encode('utf-8'))            # "\n" marks the end
-        except Exception:
-            client.close()
-            break
- 
- 
-# Start thread for receiving messages 
-receive_thread = threading.Thread(target=receive_messages)
-receive_thread.start()
- 
-# Start thread for sending messages 
-write_thread = threading.Thread(target=write_messages)
-write_thread.start()
- 
+
+
+if __name__ == "__main__":
+    main()
