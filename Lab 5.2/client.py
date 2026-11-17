@@ -62,7 +62,7 @@ def receive_messages(client, my_name, d, n):
                 print(f"\n {decrypt(cipher, d, n)}")    # readable text
     except OSError:
         pass
-    print("Disconnected from the server. Press Enter to exit.")
+    print("Disconnected from the server. Ctrl + C to exit.")
 
 
 # ================= MAIN =================
@@ -97,7 +97,7 @@ def main():
     except OSError as err:
         print(f"Could not connect to {host}:{PORT} ({err}).")
         return
-    print(f"Connected as {my_name}. Type a message and press Enter. Ctrl+C to quit.")
+    print(f"Connected as {my_name}. Type a message and press Enter.")
 
     session = PromptSession()
     with patch_stdout():                       # lets the thread print without breaking my typing
