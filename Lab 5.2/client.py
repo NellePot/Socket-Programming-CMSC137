@@ -1,3 +1,4 @@
+import os
 import socket
 import sys
 import threading
@@ -22,6 +23,8 @@ except ImportError:
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+os.system("")          # lets the Windows terminal understand the line-erase code used below
+
 # ================= SETTINGS =================
 PORT = 65432            # must be the same as the server's port
                         # host can be typed in the terminal
@@ -45,16 +48,19 @@ def decrypt(cipher, d, n):
     return "".join(chr(pow(int(num), d, n)) for num in cipher.split())
 
 
-def build_line(text, partners):
+def build_line(text, partners, sender):
     #Makes ONE line holding an encrypted copy of the text for every partner
-    #Format:  name=numbers|name=numbers
-    return "|".join(f"{name}={encrypt(text, e, n)}" for name, (e, n) in partners.items())
+    #Format:  from=sender|name=numbers|name=numbers
+    copies = "|".join(f"{name}={encrypt(text, e, n)}" for name, (e, n) in partners.items())
+    return f"from={sender}|{copies}"
 
 
 def find_my_copy(line, my_name):
     #Looks through the line for the copy meant for me. Returns None if there is none
     for part in line.split("|"):
         name, _, cipher = part.partition("=")
+        if name == "from":
+            continue                              # sender label, not a copy
         if name == my_name:
             return cipher
     return None
@@ -82,18 +88,31 @@ def ask_private_key():
 
 
 # ================= RECEIVING (runs in its own thread) =================
-def receive_messages(client, my_name, d, n):
-    #Constantly listens for lines from the server, then decrypts my copy
+def first_copy(line):
+    #For someone who can't decrypt: any copy will do, it is unreadable to them anyway
+    for part in line.split("|"):
+        name, _, cipher = part.partition("=")
+        if name != "from":
+            return cipher
+    return ""
+
+
+def receive_messages(client, my_name, d, n, authorized):
+    #Constantly listens for lines from the server.
+    #Authorized: decrypt my copy. Unauthorized: can only show the encrypted numbers.
     reader = client.makefile("r", encoding="utf-8")      # reads one full line at a time
     try:
         for line in reader:
-            cipher = find_my_copy(line.strip(), my_name)
-            if cipher:
-             #   print(f"\n [Encrypted] {cipher}")                   # what travelled (unreadable)
-                print(f"\n{decrypt(cipher, d, n)}")    # readable text
+            line = line.strip()
+            if authorized:
+                cipher = find_my_copy(line, my_name)
+                if cipher:
+                    message = decrypt(cipher, d, n).strip()
+                    sender, _, body = message.partition(": ")
+                    print(f"{sender.upper()}: {body}")          # sender's name in CAPITALS
             else:
-                print(f"[Notice] A message arrived with no copy for '{my_name}'. "
-                      "Each laptop must use its OWN name.")
+                cipher = find_my_copy(line, my_name) or first_copy(line)
+                print(f"[ENCRYPTED] {cipher}")                  # no private key = unreadable
     except OSError:
         pass
     print("Disconnected from the server. Press Enter to exit.")
@@ -111,31 +130,42 @@ def main():
         host = sys.argv[2]
     else:
         host = input("Server IP (just press Enter if the server is on this laptop): ").strip() or "127.0.0.1"
+    authorized = True                          # becomes False for a wrong name or wrong private key
+    my_d = my_n = None
     if my_name not in PUBLIC_KEYS:
-        sys.exit(f"Unknown name '{my_name}'. Choose from: {', '.join(PUBLIC_KEYS)}")
+        authorized = False                     # name not on the list: allowed in, but can't decrypt
+    else:
+        my_e, my_n = PUBLIC_KEYS[my_name]
 
-    my_e, my_n = PUBLIC_KEYS[my_name]
     # everyone I will encrypt for (all the others; myself too only when testing alone)
     partners = {name: key for name, key in PUBLIC_KEYS.items() if SOLO_TEST or name != my_name}
     limit = min(n for e, n in PUBLIC_KEYS.values())      # a character's number must be below every n
 
-    nickname = input("Choose your nickname: ")
+    nickname = my_name                         # chat name = your name (no second question)
 
     # Ask for the private key (asterisks) and check it BEFORE connecting:
     # encrypt 65 with my public key, then decrypt it with the typed key. We must get 65 back.
-    while True:
-        typed = ask_private_key()
-        if typed.isascii() and typed.isdigit() and pow(pow(65, my_e, my_n), int(typed), my_n) == 65:
-            my_d = int(typed)                  # kept in memory only, never saved anywhere
-            break
-        print("Wrong private key, try again.")
+    # 3 wrong tries = you still enter the chat, but as UNAUTHORIZED.
+    if authorized:
+        for attempt in range(3):
+            typed = ask_private_key()
+            if typed.isascii() and typed.isdigit() and pow(pow(65, my_e, my_n), int(typed), my_n) == 65:
+                my_d = int(typed)              # kept in memory only, never saved anywhere
+                break
+            print("Wrong private key.")
+        else:
+            authorized = False
 
     # Connect (sir's code)
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((host, PORT))
-    print(f"\nConnected as '{my_name}'. Type a message and press Enter. Ctrl+C to quit.\n")
+    if authorized:
+        print(f"\nConnected as '{my_name}'. Type a message and press Enter. Ctrl+C to quit.\n")
+    else:
+        print("\nUNAUTHORIZED: you joined the chat, but you can only see encrypted messages.")
+        print("You cannot send messages. Ctrl+C to quit.\n")
 
-    threading.Thread(target=receive_messages, args=(client, my_name, my_d, my_n),
+    threading.Thread(target=receive_messages, args=(client, my_name, my_d, my_n, authorized),
                      daemon=True).start()
     while True:
         try:
@@ -144,12 +174,16 @@ def main():
             break
         if not text:
             continue
+        if not authorized:
+            print("You are not authorized to send messages.")
+            continue
         full_message = f"{nickname}: {text}\n"                 # format message with nickname
         if any(ord(ch) >= limit for ch in full_message):
-            print("\nSome characters can't be encrypted (emoji or special symbols). Try again.")
+            print("Some characters can't be encrypted (emoji or special symbols). Try again.")
             continue
+        print(f"\033[A\033[2K{'YOU'}: {text}")          # replace what I typed with "YOU: message"
         try:
-            client.sendall((build_line(full_message, partners) + "\n").encode("utf-8"))
+            client.sendall((build_line(full_message, partners, my_name) + "\n").encode("utf-8"))
         except OSError:
             break
     client.close()

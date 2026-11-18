@@ -6,7 +6,7 @@ import socket
 import threading
 
 # ================= SETTINGS =================
-HOST = '10.74.0.142'      # IP of the laptop running server.py (same laptop = 127.0.0.1)
+HOST = '127.0.0.1'      # IP of the laptop running server.py (same laptop = 127.0.0.1)
 PORT = 65432            # must be the same as PORT in client.py
 
 # ================= SERVER SOCKET =================
@@ -43,7 +43,10 @@ def handle_client(client):
             text = line.decode('utf-8').strip()
             header, _, copies = text.partition('|')             # "from=nelle" | "chong=...|mm=..."
             sender = header[5:] if header.startswith('from=') else 'unknown'
-            print(f"[Relay] {sender} sent: {copies}")
+            print(f"[Relay] {sender} sent an encrypted message:")
+            for copy in copies.split('|'):                      # one line per recipient
+                name, _, cipher = copy.partition('=')
+                print(f"   for {name}: {cipher}")
             broadcast(line, client)
         except OSError:
             break
